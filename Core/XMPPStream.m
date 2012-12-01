@@ -855,6 +855,26 @@ enum XMPPStreamConfig
 	return result;
 }
 
+/**
+ * Returns YES if the a connection is currently being established.
+ * If the stream is neither disconnected, nor connected, then a connection is currently being established.
+ **/
+- (BOOL)isConnecting
+{
+	__block BOOL result = NO;
+	
+	dispatch_block_t block = ^{
+		result = (state != STATE_XMPP_DISCONNECTED && state != STATE_XMPP_CONNECTED);
+	};
+	
+	if (dispatch_get_current_queue() == xmppQueue)
+		block();
+	else
+		dispatch_sync(xmppQueue, block);
+	
+	return result;
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 #pragma mark C2S Connection
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
