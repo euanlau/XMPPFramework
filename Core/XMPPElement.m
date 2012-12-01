@@ -104,4 +104,21 @@
 	return [XMPPJID jidWithString:[self fromStr]];
 }
 
+- (void)setTo:(XMPPJID *)to
+{
+  [self removeAttributeForName:@"to"];
+  [self addAttributeWithName:@"to" stringValue:[to full]];
+}
+
+- (void)setFrom:(XMPPJID *)from
+{
+  [self removeAttributeForName:@"from"];
+  [self addAttributeWithName:@"from" stringValue:[from full]];
+}
+
+- (void)setElementID:(NSString *)elementID
+{
+  [self removeAttributeForName:@"id"];
+  [self addAttributeWithName:@"id" stringValue:elementID];
+}
 @end

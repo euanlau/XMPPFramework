@@ -17,10 +17,9 @@
 
 @interface XMPPElement : NSXMLElement <NSCoding, NSCopying>
 
-- (NSString *)elementID;
-
-- (XMPPJID *)to;
-- (XMPPJID *)from;
+@property (nonatomic, strong) XMPPJID  *to;
+@property (nonatomic, strong) XMPPJID  *from;
+@property (nonatomic, strong) NSString *elementID;
 
 - (NSString *)toStr;
 - (NSString *)fromStr;
