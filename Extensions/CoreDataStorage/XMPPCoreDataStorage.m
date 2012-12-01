@@ -672,7 +672,7 @@ static NSMutableSet *databaseFileNames;
 		
 		if ([NSManagedObjectContext instancesRespondToSelector:@selector(initWithConcurrencyType:)])
 			mainThreadManagedObjectContext =
-			    [[NSManagedObjectContext alloc] initWithConcurrencyType:NSMainQueueConcurrencyType];
+      [[NSManagedObjectContext alloc] initWithConcurrencyType:  NSConfinementConcurrencyType];
 		else
 			mainThreadManagedObjectContext = [[NSManagedObjectContext alloc] init];
 		
