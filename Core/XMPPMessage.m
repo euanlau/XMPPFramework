@@ -45,12 +45,12 @@
 	return [[XMPPMessage alloc] init];
 }
 
-+ (XMPPMessage *)messageWithType:(NSString *)type
++ (XMPPMessage *)messageWithType:(XMPPMessageType)type
 {
 	return [[XMPPMessage alloc] initWithType:type to:nil];
 }
 
-+ (XMPPMessage *)messageWithType:(NSString *)type to:(XMPPJID *)to
++ (XMPPMessage *)messageWithType:(XMPPMessageType)type to:(XMPPJID *)to
 {
 	return [[XMPPMessage alloc] initWithType:type to:to];
 }
@@ -61,18 +61,17 @@
 	return self;
 }
 
-- (id)initWithType:(NSString *)type
+- (id)initWithType:(XMPPMessageType)type
 {
 	return [self initWithType:type to:nil];
 }
 
-- (id)initWithType:(NSString *)type to:(XMPPJID *)to
+- (id)initWithType:(XMPPMessageType)type to:(XMPPJID *)to
 {
 	if ((self = [super initWithName:@"message"]))
 	{
-		if (type)
-			[self addAttributeWithName:@"type" stringValue:type];
-		
+		self.type = type;
+    
 		if (to)
 			[self addAttributeWithName:@"to" stringValue:[to description]];
 	}
@@ -86,7 +85,7 @@
 
 - (BOOL)isChatMessageWithBody
 {
-	if ([self isChatMessage])
+	if([self isChatMessage])
 	{
 		return [self isMessageWithBody];
 	}
@@ -113,6 +112,94 @@
 - (BOOL)isMessageWithBody
 {
 	return ([self elementForName:@"body"] != nil);
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+- (XMPPMessageType) type
+{
+  NSString *typeStr = [[self attributeStringValueForName:@"type"] lowercaseString];
+  
+  if (!typeStr)
+    return XMPPMessageTypeNone;
+  
+  if ([typeStr isEqualToString:@"chat"])
+    return XMPPMessageTypeChat;
+  
+  if ([typeStr isEqualToString:@"groupchat"])
+    return XMPPMessageTypeGroupChat;
+  
+  if ([typeStr isEqualToString:@"error"])
+    return XMPPMessageTypeError;
+  
+  if ([typeStr isEqualToString:@"headline"])
+    return XMPPMessageTypeHeadline;
+  
+  if ([typeStr isEqualToString:@"normal"])
+    return XMPPMessageTypeNormal;
+  
+  return XMPPMessageTypeNone;
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+- (void) setType:(XMPPMessageType)type
+{
+  NSXMLNode *typeAttribute = [self attributeForName:@"type"];
+  
+  NSString *typeStr;
+  
+  switch (type) {
+    case XMPPMessageTypeChat:
+      typeStr = @"chat";
+      break;
+    case XMPPMessageTypeGroupChat:
+      typeStr = @"groupchat";
+      break;
+    case XMPPMessageTypeError:
+      typeStr = @"error";
+      break;
+    case XMPPMessageTypeHeadline:
+      typeStr = @"headline";
+      break;
+    case XMPPMessageTypeNormal:
+      typeStr = @"normal";
+      break;
+      
+    case XMPPMessageTypeNone:
+    default:
+      if (typeAttribute)
+        [self removeAttributeForName:@"type"];
+      return;
+  }
+  
+  if (!typeAttribute)
+  {
+    [self addAttributeWithName:@"type" stringValue:typeStr];
+  }
+  else
+  {
+    [typeAttribute setStringValue:typeStr];
+  }
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+- (NSString *) body
+{
+  return [[self elementForName:@"body"] stringValue];
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+- (void) setBody:(NSString *)body
+{
+  NSXMLElement *bodyElement = [self elementForName:@"body"];
+  if (!bodyElement)
+  {
+    bodyElement = [NSXMLElement elementWithName:@"body" stringValue:body];
+    [self addChild:bodyElement];
+  }
+  else
+  {
+    [bodyElement setStringValue:body];
+  }
 }
 
 @end

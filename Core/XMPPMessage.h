@@ -1,6 +1,15 @@
 #import <Foundation/Foundation.h>
 #import "XMPPElement.h"
 
+typedef enum XMPPMessageType {
+  XMPPMessageTypeNone,
+  XMPPMessageTypeChat,
+  XMPPMessageTypeGroupChat,
+  XMPPMessageTypeNormal,
+  XMPPMessageTypeError,
+  XMPPMessageTypeHeadline
+} XMPPMessageType;
+
 /**
  * The XMPPMessage class represents a <message> element.
  * It extends XMPPElement, which in turn extends NSXMLElement.
@@ -17,12 +26,12 @@
 + (XMPPMessage *)messageFromElement:(NSXMLElement *)element;
 
 + (XMPPMessage *)message;
-+ (XMPPMessage *)messageWithType:(NSString *)type;
-+ (XMPPMessage *)messageWithType:(NSString *)type to:(XMPPJID *)to;
++ (XMPPMessage *)messageWithType:(XMPPMessageType)type;
++ (XMPPMessage *)messageWithType:(XMPPMessageType)type to:(XMPPJID *)to;
 
 - (id)init;
-- (id)initWithType:(NSString *)type;
-- (id)initWithType:(NSString *)type to:(XMPPJID *)to;
+- (id)initWithType:(XMPPMessageType)type;
+- (id)initWithType:(XMPPMessageType)type to:(XMPPJID *)to;
 
 - (BOOL)isChatMessage;
 - (BOOL)isChatMessageWithBody;
@@ -30,5 +39,8 @@
 - (BOOL)isMessageWithBody;
 
 - (NSError *)errorMessage;
+
+@property (nonatomic, assign) XMPPMessageType type;
+@property (nonatomic, strong) NSString *body;
 
 @end
