@@ -6,5 +6,5 @@
 
 - (BOOL)wasDelayed;
 - (NSDate *)delayedDeliveryDate;
-
+- (NSDate *)date;
 @end

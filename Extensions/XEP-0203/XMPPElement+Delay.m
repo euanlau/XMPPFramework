@@ -81,4 +81,16 @@
 	return nil;
 }
 
+- (NSDate *)date
+{
+  if ([self wasDelayed])
+  {
+    return [self delayedDeliveryDate];
+  }
+  else
+  {
+    return [NSDate date];
+  }
+}
+
 @end
