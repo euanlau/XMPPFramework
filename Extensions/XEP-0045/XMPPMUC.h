@@ -2,7 +2,13 @@
 #import "XMPP.h"
 #import "XMPPRoom.h"
 
+@protocol XMPPMUCStorage;
+
 #define _XMPP_MUC_H
+
+typedef enum _XMPPMUCErrorType {
+  XMPPMUCExceedMaximumRoomCountErrorType = 0
+} XMPPMUCErrorType;
 
 /**
  * The XMPPMUC module, combined with XMPPRoom and associated storage classes,
@@ -18,7 +24,7 @@
  *  - It listens for MUC room invitations sent from other users.
 **/
 
-@interface XMPPMUC : XMPPModule
+@interface XMPPMUC : XMPPModule <XMPPStreamDelegate>
 {
 /*	Inherited from XMPPModule:
 	 
@@ -26,9 +32,13 @@
 	
 	dispatch_queue_t moduleQueue;
  */
-	
-	NSMutableSet *rooms;
+  
+  __strong id <XMPPMUCStorage> xmppMUCStorage;
+	NSMutableSet *rooms;  
 }
+
+- (id)initWithMUCStorage:(id<XMPPMUCStorage>)storage;
+- (id)initWithMUCStorage:(id<XMPPMUCStorage>)storage dispatchQueue:(dispatch_queue_t)queue;
 
 /* Inherited from XMPPModule:
  
@@ -44,8 +54,13 @@
  
 */
 
+@property (nonatomic, assign, getter = isAutoAcceptInvitation) BOOL autoAcceptInvitation;
+@property (atomic, assign) NSUInteger maxRoomCount;
+
 - (BOOL)isMUCRoomPresence:(XMPPPresence *)presence;
 - (BOOL)isMUCRoomMessage:(XMPPMessage *)message;
+- (void)createRoomWithParticipants:(NSArray *)participants subject:(NSString*)subject;
+- (XMPPRoom *)roomWithJID:(XMPPJID *)jid;
 
 @end
 
@@ -58,5 +73,17 @@
 
 - (void)xmppMUC:(XMPPMUC *)sender didReceiveRoomInvitation:(XMPPMessage *)message;
 - (void)xmppMUC:(XMPPMUC *)sender didReceiveRoomInvitationDecline:(XMPPMessage *)message;
+- (void)xmppMUC:(XMPPMUC *)sender didReceiveMessage:(XMPPMessage *)message;
+- (void)xmppMUC:(XMPPMUC *)sender didReceivePresence:(XMPPPresence *)presence;
+- (void)xmppMUC:(XMPPMUC *)sender didReceiveIQ:(XMPPIQ *)iq;
 
+- (void)xmppMUC:(XMPPMUC *)sender didCreateRoom:(XMPPRoom *)room;
+- (void)xmppMUC:(XMPPMUC *)sender didFailToCreateRoomWithError:(NSError *)error;
+@end
+
+@protocol XMPPMUCStorage <XMPPRoomStorage>
+- (NSDictionary *)fetchExistingRoomJids:(XMPPMUC *)sender;
+@optional
+
+- (void)xmppMUC:(XMPPMUC *)sender handleInvitation:(XMPPMessage *)message;
 @end

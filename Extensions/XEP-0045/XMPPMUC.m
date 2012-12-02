@@ -1,16 +1,58 @@
+#import "XMPP.h"
 #import "XMPPMUC.h"
 #import "XMPPFramework.h"
+#import "XMPPMessage+XEP0045.h"
+#import "XMPPLogging.h"
+
+// Log levels: off, error, warn, info, verbose
+// Log flags: trace
+#if DEBUG
+static const int xmppLogLevel = XMPP_LOG_LEVEL_WARN; // | XMPP_LOG_FLAG_TRACE;
+#else
+static const int xmppLogLevel = XMPP_LOG_LEVEL_WARN;
+#endif
+
+@interface XMPPMUC ()
+- (XMPPRoom *)createRoom:(XMPPJID *)jid withSubject:(NSString *)subject;
+@end
 
 
 @implementation XMPPMUC
 
+@synthesize autoAcceptInvitation = _autoAcceptInvitation;
+
+- (id)init 
+{
+  return [self initWithMUCStorage:nil dispatchQueue:NULL];
+}
+
 - (id)initWithDispatchQueue:(dispatch_queue_t)queue
 {
-	if ((self = [super initWithDispatchQueue:queue]))
-	{
-		rooms = [[NSMutableSet alloc] init];
-	}
-	return self;
+	return [self initWithMUCStorage:nil dispatchQueue:queue];
+}
+
+- (id)initWithMUCStorage:(id<XMPPMUCStorage>)storage
+{
+  return [self initWithMUCStorage:storage dispatchQueue:NULL];
+}
+
+- (id)initWithMUCStorage:(id<XMPPMUCStorage>)storage dispatchQueue:(dispatch_queue_t)queue
+{
+  if ((self = [super initWithDispatchQueue:queue]))
+  {
+    if ([storage configureWithParent:self queue:moduleQueue])
+		{
+			xmppMUCStorage = storage;
+		}
+		else
+		{
+			XMPPLogError(@"%@: %@ - Unable to configure storage!", THIS_FILE, THIS_METHOD);
+		}
+
+    rooms = [[NSMutableSet alloc] init];
+    self.maxRoomCount = 10;
+  }
+  return self;
 }
 
 - (BOOL)activate:(XMPPStream *)aXmppStream
@@ -20,6 +62,16 @@
 #ifdef _XMPP_CAPABILITIES_H
 		[xmppStream autoAddDelegate:self delegateQueue:moduleQueue toModulesOfClass:[XMPPCapabilities class]];
 #endif
+    
+    NSDictionary *jids = [xmppMUCStorage fetchExistingRoomJids:self];
+    
+    [jids enumerateKeysAndObjectsUsingBlock:^(id key, id obj, BOOL *stop) {
+      
+      NSString *subject = [obj isKindOfClass:[NSNull class]] ? nil : obj;
+      
+      [self createRoom:key withSubject:subject];
+    }];
+    
 		return YES;
 	}
 	
@@ -31,14 +83,84 @@
 #ifdef _XMPP_CAPABILITIES_H
 	[xmppStream removeAutoDelegate:self delegateQueue:moduleQueue fromModulesOfClass:[XMPPCapabilities class]];
 #endif
+  
+  for (XMPPRoom *room in rooms)
+  {
+    [self removeDelegate:room];
+    [room removeDelegate:self];
+    [room deactivate];
+  }
+  
+  [rooms removeAllObjects];
 	
 	[super deactivate];
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+#pragma Private
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+- (NSString *)generateRoomName
+{
+  NSAssert(dispatch_get_current_queue() == moduleQueue, @"Private method: MUST run on moduleQueue");
+  
+  NSDateFormatter *formatter= [[NSDateFormatter alloc] init];
+  [formatter setDateFormat:@"yyyyMMddHHmmss"];
+  [formatter setTimeZone:[NSTimeZone timeZoneForSecondsFromGMT:0]];
+  NSString *timestamp = [formatter stringFromDate:[NSDate date]];
+  
+  return [NSString stringWithFormat:@"%@-%@-%@",
+          [[xmppStream myJID] user],
+          timestamp,
+          [[XMPPStream generateUUID] substringFromIndex:24]];
+  
+}
+
+- (NSString *)mucDomain
+{
+  NSString *domain = [[xmppStream myJID] domain];
+  if (!domain)
+    return nil;
+  
+  NSString *prefix = @"conference.";
+  return [prefix stringByAppendingString:domain];
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+#pragma Setters Getters
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+- (void)setAutoAcceptInvitation:(BOOL)autoAcceptInvitation
+{
+  dispatch_block_t block = ^{
+    _autoAcceptInvitation = autoAcceptInvitation;
+  };
+  
+	if (dispatch_get_current_queue() == moduleQueue)
+    block();
+  else
+    dispatch_sync(moduleQueue, block);  
+}
+
+- (BOOL)autoAcceptInvitation
+{
+  __block BOOL result = 0;
+  
+  dispatch_block_t block = ^{
+    result = _autoAcceptInvitation;
+	};
+	
+	if (dispatch_get_current_queue() == moduleQueue)
+		block();
+	else
+		dispatch_sync(moduleQueue, block);
+	
+	return result;  
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 #pragma mark Public API
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
 - (BOOL)isMUCRoomElement:(XMPPElement *)element
 {
 	XMPPJID *bareFrom = [[element from] bareJID];
@@ -50,8 +172,12 @@
 	__block BOOL result = NO;
 	
 	dispatch_block_t block = ^{ @autoreleasepool {
-		
-		result = [rooms containsObject:bareFrom];
+    [rooms enumerateObjectsUsingBlock:^(id obj, BOOL *stop) {
+      XMPPRoom *room = obj;
+      result = [room.roomJID isEqualToJID:bareFrom options:XMPPJIDCompareBare];
+      if (result)
+        *stop = YES;
+    }];
 		
 	}};
 	
@@ -73,6 +199,78 @@
 	return [self isMUCRoomElement:message];
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
+- (void)createRoomWithParticipants:(NSArray *)participants subject:(NSString*)subject
+{
+  dispatch_block_t block = ^{ @autoreleasepool {
+    
+    if (rooms.count < self.maxRoomCount)
+    {
+    
+      NSString *roomName = [self generateRoomName];
+    
+      XMPPJID  *jid  = [XMPPJID jidWithUser:roomName domain:[self mucDomain] resource:nil];
+    
+      XMPPRoom *room = [self createRoom:jid withSubject:subject];
+    
+      [multicastDelegate xmppMUC:self didCreateRoom:room];
+      
+      [room createRoomUsingNickname:[[xmppStream myJID] user] history:nil participants:participants subject:subject];
+    }
+    else
+    {
+      NSError *error = [NSError errorWithDomain:@"XMPPMUCErrorDomain"
+                                           code:XMPPMUCExceedMaximumRoomCountErrorType
+                                       userInfo:nil];
+      [multicastDelegate xmppMUC:self didFailToCreateRoomWithError:error];
+    }
+  }};
+    
+  if (dispatch_get_current_queue() == moduleQueue)
+    block();
+  else
+    dispatch_async(moduleQueue, block);
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+- (XMPPRoom *)createRoom:(XMPPJID *)jid withSubject:(NSString *)subject
+{
+  XMPPRoom *room = [[XMPPRoom alloc] initWithRoomStorage:xmppMUCStorage jid:jid];
+  room.autoRejoin = YES;
+  [room addDelegate:self delegateQueue:moduleQueue];
+  [self addDelegate:room delegateQueue:room.moduleQueue];
+  [room activate:xmppStream];
+
+  [rooms addObject:room];
+
+	return room;
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+- (XMPPRoom *)roomWithJID:(XMPPJID *)jid
+{
+  __block XMPPRoom *result = nil;
+	
+	dispatch_block_t block = ^{ @autoreleasepool {
+    
+    for (XMPPRoom *room in rooms)
+    {
+      if ([room.roomJID isEqualToJID:jid options:XMPPJIDCompareBare])
+      {
+        result = room;
+        break;
+      }
+    }
+  }};
+
+	if (dispatch_get_current_queue() == moduleQueue)
+		block();
+	else
+		dispatch_sync(moduleQueue, block);
+	
+	return result;
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 #pragma mark XMPPStream Delegate
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -81,9 +279,8 @@
 {
 	if ([module isKindOfClass:[XMPPRoom class]])
 	{
-		XMPPJID *roomJID = [(XMPPRoom *)module roomJID];
-		
-		[rooms addObject:roomJID];
+    XMPPRoom *room = (XMPPRoom *)module;
+		[rooms addObject:room];
 	}
 }
 
@@ -91,20 +288,8 @@
 {
 	if ([module isKindOfClass:[XMPPRoom class]])
 	{
-		XMPPJID *roomJID = [(XMPPRoom *)module roomJID];
-		
-		// It's common for the room to get deactivated and deallocated before
-		// we've received the goodbye presence from the server.
-		// So we're going to postpone for a bit removing the roomJID from the list.
-		// This way the isMUCRoomElement will still remain accurate
-		// for presence elements that may arrive momentarily.
-		
-		double delayInSeconds = 30.0;
-		dispatch_time_t popTime = dispatch_time(DISPATCH_TIME_NOW, delayInSeconds * NSEC_PER_SEC);
-		dispatch_after(popTime, moduleQueue, ^{ @autoreleasepool {
-			
-			[rooms removeObject:roomJID];
-		}});
+    XMPPRoom *room = (XMPPRoom *)module;
+		[rooms removeObject:room];
 	}
 }
 
@@ -167,17 +352,65 @@
 	NSXMLElement * x = [message elementForName:@"x" xmlns:XMPPMUCUserNamespace];
 	NSXMLElement * invite  = [x elementForName:@"invite"];
 	NSXMLElement * decline = [x elementForName:@"decline"];
-	
+
 	NSXMLElement * directInvite = [message elementForName:@"x" xmlns:@"jabber:x:conference"];
 	
 	if (invite || directInvite)
 	{
+    if ([xmppMUCStorage respondsToSelector:@selector(xmppMUC:handleInvitation:)])
+    {
+      [xmppMUCStorage xmppMUC:self handleInvitation:message];
+    }
+      
+    XMPPJID *roomJID = [message roomInviteJid];
+    
+    if (roomJID)
+    {
+      XMPPRoom *room = [self createRoom:roomJID withSubject:nil];
+      [room joinRoomUsingNickname:[[xmppStream myJID] user] history:nil];
+    }
 		[multicastDelegate xmppMUC:self didReceiveRoomInvitation:message];
 	}
 	else if (decline)
 	{
 		[multicastDelegate xmppMUC:self didReceiveRoomInvitationDecline:message];
 	}
+  else
+  {
+    [multicastDelegate xmppMUC:self didReceiveMessage:message];
+  }
+}
+
+- (void)xmppStream:(XMPPStream *)sender didReceivePresence:(XMPPPresence *)presence
+{
+  [multicastDelegate xmppMUC:self didReceivePresence:presence];
+}
+
+- (BOOL)xmppStream:(XMPPStream *)sender didReceiveIQ:(XMPPIQ *)iq
+{
+  [multicastDelegate xmppMUC:self didReceiveIQ:iq];
+  return NO;
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+#pragma mark -
+#pragma mark xmppRoom delegate
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+- (void)xmppRoomDidJoin:(XMPPRoom *)sender
+{
+  [sender fetchMembersList:XMPPRoomAffiliationOwner];
+}
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+- (void)xmppRoomDidLeavePermanently:(XMPPRoom *)sender
+{
+  [self removeDelegate:sender];
+  [sender removeDelegate:self];
+  [sender deactivate];
+  [rooms removeObject:sender];
 }
 
 #ifdef _XMPP_CAPABILITIES_H
